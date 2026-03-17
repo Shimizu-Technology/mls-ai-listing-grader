@@ -16,6 +16,7 @@ source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
 # set OPENROUTER_API_KEY in .env
+# optional: set APP_API_KEY to require x-api-key for /api/*
 uvicorn src.app:app --reload --port 8011
 ```
 
@@ -23,7 +24,8 @@ uvicorn src.app:app --reload --port 8011
 ```bash
 cd frontend
 npm install
-# optional: VITE_API_BASE=http://localhost:8011
+cp .env.example .env
+# set VITE_API_BASE if not using localhost:8011
 npm run dev
 ```
 
