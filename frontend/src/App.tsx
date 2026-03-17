@@ -23,8 +23,10 @@ function App() {
   const [debug, setDebug] = useState('')
   const [apiKey, setApiKey] = useState('')
   const [selected, setSelected] = useState<Listing | null>(null)
-  const [feedbackHistory, setFeedbackHistory] = useState<Array<{label:string;createdAt?:string}>>([])
+  const [feedbackHistory, setFeedbackHistory] = useState<Array<{label:string;createdAt?:string;notes?:string}>>([])
   const [detailStatus, setDetailStatus] = useState<'unreviewed'|'watchlist'|'visited'|'rejected'>('unreviewed')
+  const [detailFeedbackLabel, setDetailFeedbackLabel] = useState<'good_lead'|'false_positive'|'false_negative'|''>('')
+  const [detailFeedbackNotes, setDetailFeedbackNotes] = useState('')
 
   useEffect(() => {
     const persistedKey = localStorage.getItem('mls_api_key') || ''
@@ -96,9 +98,13 @@ function App() {
     setScorecard({ ...scorecard, ...presets[name] })
   }
 
-  async function onFeedback(listingId: string, label: string) {
+  async function onFeedback(listingId: string, label: string, notes?: string) {
     if (!runId || !label) return
-    await saveFeedback(runId, listingId, label)
+    await saveFeedback(runId, listingId, label, notes)
+    if (selected?.listingId === listingId) {
+      const fb = await getFeedback(runId, listingId)
+      setFeedbackHistory((fb.items || []).map((x: { label: string; createdAt?: string; notes?: string }) => ({ label: x.label, createdAt: x.createdAt, notes: x.notes })))
+    }
   }
 
   async function onEmailDraft() {
@@ -114,8 +120,10 @@ function App() {
       getFeedback(runId, item.listingId),
       getReviewStatus(runId, item.listingId),
     ])
-    setFeedbackHistory((fb.items || []).map((x: { label: string; createdAt?: string }) => ({ label: x.label, createdAt: x.createdAt })))
+    setFeedbackHistory((fb.items || []).map((x: { label: string; createdAt?: string; notes?: string }) => ({ label: x.label, createdAt: x.createdAt, notes: x.notes })))
     setDetailStatus((rs.status || 'unreviewed') as 'unreviewed' | 'watchlist' | 'visited' | 'rejected')
+    setDetailFeedbackLabel('')
+    setDetailFeedbackNotes('')
   }
 
   async function saveDetailStatus(next: 'unreviewed'|'watchlist'|'visited'|'rejected') {
@@ -247,12 +255,26 @@ function App() {
                     <div className="kicker">review: {x.reviewStatus || 'unreviewed'}</div>
                   </td>
                   <td>
-                    <select onClick={(e)=>e.stopPropagation()} onChange={(e) => onFeedback(x.listingId, e.target.value)} defaultValue="">
-                      <option value="">-</option>
-                      <option value="good_lead">good_lead</option>
-                      <option value="false_positive">false_positive</option>
-                      <option value="false_negative">false_negative</option>
-                    </select>
+                    <div className="row">
+                      <select onClick={(e)=>e.stopPropagation()} onChange={(e) => onFeedback(x.listingId, e.target.value)} defaultValue="">
+                        <option value="">feedback</option>
+                        <option value="good_lead">good_lead</option>
+                        <option value="false_positive">false_positive</option>
+                        <option value="false_negative">false_negative</option>
+                      </select>
+                      <button onClick={(e)=>{
+                        e.stopPropagation();
+                        if(runId) setReviewStatus(runId, x.listingId, 'watchlist').then(() =>
+                          setItems(prev => prev.map(i => i.listingId === x.listingId ? { ...i, reviewStatus: 'watchlist' } : i))
+                        )
+                      }}>watch</button>
+                      <button onClick={(e)=>{
+                        e.stopPropagation();
+                        if(runId) setReviewStatus(runId, x.listingId, 'visited').then(() =>
+                          setItems(prev => prev.map(i => i.listingId === x.listingId ? { ...i, reviewStatus: 'visited' } : i))
+                        )
+                      }}>visited</button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -285,8 +307,19 @@ function App() {
               <option value="rejected">rejected</option>
             </select>
           </div>
+          <div className="row" style={{ marginTop: 10 }}>
+            <strong>Add feedback:</strong>
+            <select value={detailFeedbackLabel} onChange={(e)=>setDetailFeedbackLabel(e.target.value as any)}>
+              <option value="">select label</option>
+              <option value="good_lead">good_lead</option>
+              <option value="false_positive">false_positive</option>
+              <option value="false_negative">false_negative</option>
+            </select>
+            <input placeholder="optional notes" value={detailFeedbackNotes} onChange={(e)=>setDetailFeedbackNotes(e.target.value)} style={{ minWidth: 260 }} />
+            <button onClick={async()=>{ if(selected && detailFeedbackLabel){ await onFeedback(selected.listingId, detailFeedbackLabel, detailFeedbackNotes); setDetailFeedbackLabel(''); setDetailFeedbackNotes(''); }}}>save feedback</button>
+          </div>
           <div className="kicker" style={{ marginTop: 10 }}>
-            <strong>Recent feedback:</strong> {feedbackHistory.length ? feedbackHistory.map((f)=>`${f.label}${f.createdAt?` (${new Date(f.createdAt).toLocaleString()})`:''}`).join(' | ') : 'none'}
+            <strong>Recent feedback:</strong> {feedbackHistory.length ? feedbackHistory.map((f)=>`${f.label}${f.notes?`: ${f.notes}`:''}${f.createdAt?` (${new Date(f.createdAt).toLocaleString()})`:''}`).join(' | ') : 'none'}
           </div>
         </div>
       )}

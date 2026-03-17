@@ -35,11 +35,11 @@ export async function saveScorecard(payload: Partial<Scorecard>) {
   return res.json()
 }
 
-export async function saveFeedback(runId: number, listingId: string, label: string) {
+export async function saveFeedback(runId: number, listingId: string, label: string, notes?: string) {
   return fetch(`${API_BASE}/api/feedback`, {
     method: 'POST',
     headers: apiHeaders({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify({ runId, listingId, label }),
+    body: JSON.stringify({ runId, listingId, label, notes }),
   })
 }
 
