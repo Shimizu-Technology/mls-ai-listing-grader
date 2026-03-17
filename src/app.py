@@ -1,5 +1,5 @@
 from fastapi import FastAPI, UploadFile, File, Form, Depends, Query
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 import csv, io
@@ -94,6 +94,9 @@ def home():
             <h3>Scorecard Weights</h3>
             <div id='weights' style='display:grid;grid-template-columns:1fr 110px;gap:6px 10px;align-items:center'></div>
             <button id='saveWeights'>Save Weights</button>
+            <button id='presetConservative' type='button'>Preset: conservative</button>
+            <button id='presetBalanced' type='button'>Preset: balanced</button>
+            <button id='presetAggressive' type='button'>Preset: aggressive</button>
             <span id='weightsMsg' style='font-size:12px;color:#666;margin-left:8px'></span>
           </div>
         </section>
@@ -110,8 +113,14 @@ def home():
             </select>
             <label>Limit:</label>
             <input id='limit' type='number' value='20' min='1' max='500' style='width:80px' />
+            <label>Sort:</label>
+            <select id='sortBy'><option value='score'>score</option><option value='price'>price</option><option value='dom'>dom</option><option value='listing'>listing</option></select>
+            <select id='sortDir'><option value='desc'>desc</option><option value='asc'>asc</option></select>
+            <button id='prevPage'>Prev</button><span id='pageInfo' style='font-size:12px;color:#666'>p1</span><button id='nextPage'>Next</button>
             <button id='refresh'>Refresh</button>
             <button id='digest'>Digest Preview</button>
+            <button id='exportCsv'>Export CSV</button>
+            <button id='emailDraft'>Email Draft</button>
           </div>
           <div id='digestOut' style='font-size:12px;color:#444;margin-bottom:10px'></div>
           <table border='1' cellspacing='0' cellpadding='6' width='100%' style='border-collapse:collapse'>
@@ -136,6 +145,8 @@ def home():
           const digestOut = document.getElementById('digestOut');
           let currentRunId = null;
           let currentWeights = {};
+          let currentPage = 1;
+          let totalRows = 0;
 
           function fmtMoney(n){ return new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:0}).format(n||0); }
 
@@ -174,11 +185,17 @@ def home():
             if(!currentRunId){ rowsEl.innerHTML=''; return; }
             const bucket = document.getElementById('bucket').value;
             const limit = document.getElementById('limit').value || '20';
-            const q = new URLSearchParams({runId:String(currentRunId), limit:String(limit)});
+            const sortBy = document.getElementById('sortBy').value;
+            const sortDir = document.getElementById('sortDir').value;
+            const q = new URLSearchParams({runId:String(currentRunId), limit:String(limit), page:String(currentPage), sortBy, sortDir});
             if(bucket) q.set('bucket', bucket);
             const r = await fetch('/api/listings?' + q.toString());
             const j = await r.json();
             rowsEl.innerHTML = '';
+            totalRows = j.total || 0;
+            const maxPage = Math.max(1, Math.ceil(totalRows / Number(limit)));
+            if(currentPage > maxPage){ currentPage = maxPage; }
+            document.getElementById('pageInfo').textContent = `p${currentPage}/${maxPage} (${totalRows})`;
             (j.items || []).forEach(item => {
               const tr = document.createElement('tr');
               tr.innerHTML = `
@@ -227,14 +244,47 @@ def home():
             const j = await r.json();
             debug.textContent = JSON.stringify(j, null, 2);
             currentRunId = j.ingestionRunId;
+            currentPage = 1;
             runIdEl.textContent = currentRunId || '-';
             ingestionMeta.textContent = `Rows: ${j.rowsAccepted}/${j.rowsReceived}`;
             await loadListings();
           });
 
-          document.getElementById('refresh').addEventListener('click', loadListings);
+          document.getElementById('refresh').addEventListener('click', ()=>{currentPage=1; loadListings();});
           document.getElementById('digest').addEventListener('click', loadDigest);
           document.getElementById('saveWeights').addEventListener('click', saveWeights);
+          document.getElementById('prevPage').addEventListener('click', ()=>{ if(currentPage>1){ currentPage--; loadListings(); }});
+          document.getElementById('nextPage').addEventListener('click', ()=>{ currentPage++; loadListings(); });
+          document.getElementById('sortBy').addEventListener('change', ()=>{ currentPage=1; loadListings(); });
+          document.getElementById('sortDir').addEventListener('change', ()=>{ currentPage=1; loadListings(); });
+          document.getElementById('bucket').addEventListener('change', ()=>{ currentPage=1; loadListings(); });
+          document.getElementById('limit').addEventListener('change', ()=>{ currentPage=1; loadListings(); });
+
+          document.getElementById('exportCsv').addEventListener('click', ()=>{
+            if(!currentRunId) return;
+            window.open(`/api/export/top.csv?runId=${currentRunId}&top=200`, '_blank');
+          });
+
+          document.getElementById('emailDraft').addEventListener('click', async ()=>{
+            if(!currentRunId) return;
+            const r = await fetch(`/api/digest/email_draft?runId=${currentRunId}&top=5`);
+            const j = await r.json();
+            debug.textContent = `SUBJECT: ${j.subject}\n\n${j.body}`;
+          });
+
+          function applyPreset(name){
+            const presets = {
+              conservative: {ppsf_low_bonus:8, ppsf_mid_bonus:4, dom_low_bonus:4, dom_mid_bonus:2, dom_high_penalty:5, condition_good_bonus:6, condition_fair_penalty:8, ai_upside_bonus:1.5, ai_risk_penalty:3.5},
+              balanced: {ppsf_low_bonus:12, ppsf_mid_bonus:6, dom_low_bonus:6, dom_mid_bonus:3, dom_high_penalty:3, condition_good_bonus:8, condition_fair_penalty:6, ai_upside_bonus:2, ai_risk_penalty:2.5},
+              aggressive: {ppsf_low_bonus:14, ppsf_mid_bonus:8, dom_low_bonus:5, dom_mid_bonus:2, dom_high_penalty:2, condition_good_bonus:6, condition_fair_penalty:4, ai_upside_bonus:2.5, ai_risk_penalty:1.8}
+            };
+            const p = presets[name];
+            Object.keys(p).forEach(k=>{ const el=document.getElementById('w_'+k); if(el) el.value = p[k]; });
+          }
+          document.getElementById('presetConservative').addEventListener('click', ()=>applyPreset('conservative'));
+          document.getElementById('presetBalanced').addEventListener('click', ()=>applyPreset('balanced'));
+          document.getElementById('presetAggressive').addEventListener('click', ()=>applyPreset('aggressive'));
+
 
           rowsEl.addEventListener('click', async (e) => {
             const listingId = e.target.getAttribute('data-save');
@@ -341,12 +391,30 @@ def get_listings(
     runId: int = Query(...),
     bucket: str | None = Query(default=None),
     limit: int = Query(default=TOP_DEFAULT),
+    page: int = Query(default=1),
+    sortBy: str = Query(default="score"),
+    sortDir: str = Query(default="desc"),
     db: Session = Depends(get_db),
 ):
     q = db.query(Listing).filter(Listing.run_id == runId)
     if bucket:
         q = q.filter(Listing.bucket == bucket)
-    rows = q.order_by(Listing.score.desc()).limit(limit).all()
+
+    total = q.count()
+
+    sort_map = {
+        "score": Listing.score,
+        "price": Listing.list_price,
+        "dom": Listing.dom,
+        "listing": Listing.listing_id,
+    }
+    col = sort_map.get(sortBy, Listing.score)
+    q = q.order_by(col.desc() if sortDir == "desc" else col.asc())
+
+    page = max(1, page)
+    limit = max(1, min(500, limit))
+    offset = (page - 1) * limit
+    rows = q.offset(offset).limit(limit).all()
 
     return {
         "items": [
@@ -361,10 +429,51 @@ def get_listings(
                 "aiSummary": r.ai_summary,
             }
             for r in rows
-        ]
+        ],
+        "total": total,
+        "page": page,
+        "pageSize": limit,
     }
 
 
+
+
+@app.get("/api/export/top.csv")
+def export_top_csv(runId: int = Query(...), top: int = Query(default=25), db: Session = Depends(get_db)):
+    rows = (
+        db.query(Listing)
+        .filter(Listing.run_id == runId)
+        .order_by(Listing.score.desc())
+        .limit(max(1, min(500, top)))
+        .all()
+    )
+    output = io.StringIO()
+    w = csv.writer(output)
+    w.writerow(["ListingId", "Score", "Bucket", "Price", "DOM", "AiSummary"])
+    for r in rows:
+        w.writerow([r.listing_id, r.score, r.bucket, r.list_price, r.dom, r.ai_summary or ""])
+    return Response(
+        content=output.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=mls_top_{runId}.csv"},
+    )
+
+
+@app.get("/api/digest/email_draft")
+def digest_email_draft(runId: int = Query(...), top: int = Query(default=5), db: Session = Depends(get_db)):
+    rows = (
+        db.query(Listing)
+        .filter(Listing.run_id == runId)
+        .order_by(Listing.score.desc())
+        .limit(max(1, min(20, top)))
+        .all()
+    )
+    lines = [f"MLS Top {top} candidates (run {runId})", ""]
+    for i, r in enumerate(rows, start=1):
+        lines.append(f"{i}. {r.listing_id} | score {r.score} | {r.bucket} | ${r.list_price:,.0f} | DOM {r.dom}")
+        if r.ai_summary:
+            lines.append(f"   - {r.ai_summary}")
+    return {"subject": f"MLS Top {top} candidates", "body": "\n".join(lines)}
 @app.get("/api/scorecards/active")
 def get_scorecard(db: Session = Depends(get_db)):
     cfg = get_or_create_scorecard(db)
