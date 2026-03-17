@@ -12,6 +12,14 @@ export interface Listing {
   reasons: string[]
   risks: string[]
   reviewStatus?: 'unreviewed' | 'watchlist' | 'visited' | 'rejected'
+  roi?: {
+    arv_estimate: number
+    rehab_estimate: number
+    holding_cost: number
+    transaction_cost: number
+    projected_profit: number
+    projected_margin: number
+  }
 }
 
 export interface ListingsResponse {

@@ -64,6 +64,16 @@ export async function getReviewStatus(runId: number, listingId: string) {
   return res.json()
 }
 
+export async function fetchRuns(limit = 20) {
+  const res = await fetch(`${API_BASE}/api/runs?limit=${limit}`, { headers: apiHeaders() })
+  return res.json()
+}
+
+export async function compareRuns(currentRunId: number) {
+  const res = await fetch(`${API_BASE}/api/runs/compare?currentRunId=${currentRunId}`, { headers: apiHeaders() })
+  return res.json()
+}
+
 export async function exportCsv(runId: number, top = 200) {
   const res = await fetch(`${API_BASE}/api/export/top.csv?runId=${runId}&top=${top}`, { headers: apiHeaders() })
   return res.blob()

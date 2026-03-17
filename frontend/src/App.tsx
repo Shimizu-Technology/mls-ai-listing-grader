@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { FileUp, Filter, SlidersHorizontal, Download, Mail, KeyRound, X } from 'lucide-react'
-import { emailDraft, exportCsv, fetchListings, fetchScorecard, getFeedback, getReviewStatus, saveFeedback, saveScorecard, setReviewStatus, uploadCsv } from './api'
+import { compareRuns, emailDraft, exportCsv, fetchListings, fetchRuns, fetchScorecard, getFeedback, getReviewStatus, saveFeedback, saveScorecard, setReviewStatus, uploadCsv } from './api'
 import type { Listing, Scorecard } from './types'
 
 const WEIGHT_KEYS: (keyof Scorecard)[] = [
@@ -13,6 +13,7 @@ function App() {
   const [file, setFile] = useState<File | null>(null)
   const [meta, setMeta] = useState('')
   const [bucket, setBucket] = useState('')
+  const [reviewFilter, setReviewFilter] = useState('')
   const [limit, setLimit] = useState(20)
   const [sortBy, setSortBy] = useState('score')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
@@ -23,6 +24,8 @@ function App() {
   const [debug, setDebug] = useState('')
   const [apiKey, setApiKey] = useState('')
   const [selected, setSelected] = useState<Listing | null>(null)
+  const [runs, setRuns] = useState<Array<{id:number;createdAt?:string;rowsAccepted:number;filename?:string}>>([])
+  const [runCompare, setRunCompare] = useState<{previousRunId?:number;overlap?:string[];newTop?:string[];droppedTop?:string[]}|null>(null)
   const [feedbackHistory, setFeedbackHistory] = useState<Array<{label:string;createdAt?:string;notes?:string}>>([])
   const [detailStatus, setDetailStatus] = useState<'unreviewed'|'watchlist'|'visited'|'rejected'>('unreviewed')
   const [detailFeedbackLabel, setDetailFeedbackLabel] = useState<'good_lead'|'false_positive'|'false_negative'|''>('')
@@ -33,11 +36,13 @@ function App() {
     setApiKey(persistedKey)
 
     fetchScorecard().then(setScorecard).catch((e) => setDebug(String(e)))
+    refreshRuns().catch((e) => setDebug(String(e)))
     const raw = localStorage.getItem('mls_ui_state')
     if (raw) {
       const s = JSON.parse(raw)
       if (s.runId) setRunId(s.runId)
       if (s.bucket !== undefined) setBucket(s.bucket)
+      if (s.reviewFilter !== undefined) setReviewFilter(s.reviewFilter)
       if (s.limit) setLimit(s.limit)
       if (s.sortBy) setSortBy(s.sortBy)
       if (s.sortDir) setSortDir(s.sortDir)
@@ -46,14 +51,14 @@ function App() {
   }, [])
 
   useEffect(() => {
-    localStorage.setItem('mls_ui_state', JSON.stringify({ runId, bucket, limit, sortBy, sortDir, page }))
-  }, [runId, bucket, limit, sortBy, sortDir, page])
+    localStorage.setItem('mls_ui_state', JSON.stringify({ runId, bucket, reviewFilter, limit, sortBy, sortDir, page }))
+  }, [runId, bucket, reviewFilter, limit, sortBy, sortDir, page])
 
   useEffect(() => {
     if (!runId) return
     refreshListings()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [runId, bucket, limit, sortBy, sortDir, page])
+  }, [runId, bucket, reviewFilter, limit, sortBy, sortDir, page])
 
   const maxPage = useMemo(() => Math.max(1, Math.ceil(total / Math.max(1, limit))), [total, limit])
 
@@ -64,6 +69,7 @@ function App() {
     setMeta(`Rows accepted: ${res.rowsAccepted}/${res.rowsReceived}`)
     setDebug(JSON.stringify(res, null, 2))
     setPage(1)
+    await refreshRuns()
   }
 
   async function refreshListings() {
@@ -75,9 +81,15 @@ function App() {
       sortBy,
       sortDir,
       ...(bucket ? { bucket } : {}),
+      ...(reviewFilter ? { reviewStatus: reviewFilter } : {}),
     })
     setItems(res.items)
     setTotal(res.total)
+  }
+
+  async function refreshRuns() {
+    const res = await fetchRuns(20)
+    setRuns(res.items || [])
   }
 
   async function onSaveWeights() {
@@ -111,6 +123,13 @@ function App() {
     if (!runId) return
     const res = await emailDraft(runId, 5)
     setDebug(`SUBJECT: ${res.subject}\n\n${res.body}`)
+  }
+
+  async function onCompareRun() {
+    if (!runId) return
+    const res = await compareRuns(runId)
+    setRunCompare(res)
+    setDebug(JSON.stringify(res, null, 2))
   }
 
   async function openDetail(item: Listing) {
@@ -214,6 +233,13 @@ function App() {
             <option value="desk_review">desk_review</option>
             <option value="skip">skip</option>
           </select>
+          <select value={reviewFilter} onChange={(e) => { setReviewFilter(e.target.value); setPage(1) }}>
+            <option value="">all review states</option>
+            <option value="unreviewed">unreviewed</option>
+            <option value="watchlist">watchlist</option>
+            <option value="visited">visited</option>
+            <option value="rejected">rejected</option>
+          </select>
           <input type="number" min={1} max={500} value={limit} onChange={(e) => { setLimit(Number(e.target.value)); setPage(1) }} style={{ width: 90 }} />
           <select value={sortBy} onChange={(e) => { setSortBy(e.target.value); setPage(1) }}>
             <option value="score">score</option>
@@ -231,7 +257,17 @@ function App() {
           <button onClick={refreshListings}>Refresh</button>
           <button onClick={onExportCsv}><Download size={16} /> CSV</button>
           <button onClick={onEmailDraft}><Mail size={16} /> Draft</button>
+          <button onClick={onCompareRun}>Compare Prev Run</button>
         </div>
+
+        <div className="kicker" style={{ marginBottom: 10 }}>
+          Recent runs: {runs.slice(0, 6).map((r) => `${r.id}${r.id === runId ? '*' : ''} (${r.rowsAccepted})`).join(' • ') || 'none'}
+        </div>
+        {runCompare && (
+          <div className="kicker" style={{ marginBottom: 10 }}>
+            Compare vs run {runCompare.previousRunId}: overlap {runCompare.overlap?.length || 0}, new {runCompare.newTop?.length || 0}, dropped {runCompare.droppedTop?.length || 0}
+          </div>
+        )}
 
         <div className="table-wrap">
           <table>
@@ -253,6 +289,7 @@ function App() {
                     <div className="kicker">+ {x.reasons.join(' • ')}</div>
                     <div className="kicker risk">! {x.risks.join(' • ')}</div>
                     <div className="kicker">review: {x.reviewStatus || 'unreviewed'}</div>
+                    {x.roi && <div className="kicker">ROI est: {(x.roi.projected_margin * 100).toFixed(1)}% · profit ${x.roi.projected_profit.toLocaleString()}</div>}
                   </td>
                   <td>
                     <div className="row">
@@ -298,6 +335,11 @@ function App() {
           <p className="kicker" style={{ marginTop: 10 }}><strong>AI Summary:</strong> {selected.aiSummary || '—'}</p>
           <p className="kicker"><strong>Reasons:</strong> {selected.reasons.join(' • ') || '—'}</p>
           <p className="kicker risk"><strong>Risks:</strong> {selected.risks.join(' • ') || '—'}</p>
+          {selected.roi && (
+            <div className="kicker" style={{ marginTop: 8 }}>
+              <strong>ROI estimate:</strong> margin {(selected.roi.projected_margin * 100).toFixed(1)}% · profit ${selected.roi.projected_profit.toLocaleString()} · ARV ${selected.roi.arv_estimate.toLocaleString()} · rehab ${selected.roi.rehab_estimate.toLocaleString()}
+            </div>
+          )}
           <div className="row" style={{ marginTop: 10 }}>
             <strong>Status:</strong>
             <select value={detailStatus} onChange={(e)=>saveDetailStatus(e.target.value as any)}>

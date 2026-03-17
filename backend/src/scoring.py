@@ -54,6 +54,27 @@ def explain_listing(price: float, sqft: float, dom: int, condition: str, risk: i
     return reasons[:3], risks[:3]
 
 
+def estimate_flip_roi(price: float, condition: str, risk_signals: int, upside_signals: int):
+    c = (condition or "").lower()
+    # heuristics for MVP (tunable later)
+    rehab_pct = 0.22 if c == "fair" else 0.12 if c in ["average", "good"] else 0.07
+    rehab_pct += max(0, risk_signals - upside_signals) * 0.01
+    rehab_estimate = price * rehab_pct
+    holding_cost = price * 0.03
+    transaction_cost = price * 0.08
+    arv_estimate = price * (1.18 + (0.01 * upside_signals) - (0.005 * risk_signals))
+    projected_profit = arv_estimate - (price + rehab_estimate + holding_cost + transaction_cost)
+    projected_margin = (projected_profit / price) if price > 0 else 0.0
+    return {
+        "arv_estimate": round(arv_estimate, 2),
+        "rehab_estimate": round(rehab_estimate, 2),
+        "holding_cost": round(holding_cost, 2),
+        "transaction_cost": round(transaction_cost, 2),
+        "projected_profit": round(projected_profit, 2),
+        "projected_margin": round(projected_margin, 4),
+    }
+
+
 def score_listing(price: float, sqft: float, dom: int, condition: str, remarks: str, weights: Optional[dict] = None):
     w = {**DEFAULT_WEIGHTS, **(weights or {})}
     score = 50.0
@@ -84,4 +105,5 @@ def score_listing(price: float, sqft: float, dom: int, condition: str, remarks: 
     score = max(0, min(100, score))
     bucket = "schedule_visit" if score >= 75 else "desk_review" if score >= 60 else "skip"
     reasons, risks = explain_listing(price, sqft, dom, condition, risk, upside)
-    return round(score, 1), bucket, risk, upside, reasons, risks
+    roi = estimate_flip_roi(price, condition, risk, upside)
+    return round(score, 1), bucket, risk, upside, reasons, risks, roi

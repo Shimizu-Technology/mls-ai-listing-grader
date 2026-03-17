@@ -9,7 +9,7 @@ from typing import Optional
 
 from .db import Base, engine, get_db
 from .models import IngestionRun, Listing, ScorecardConfig, FeedbackLabel, ListingReviewStatus
-from .scoring import score_listing, explain_listing
+from .scoring import score_listing, explain_listing, estimate_flip_roi
 from .ai import summarize_remarks
 from .config import TOP_DEFAULT, APP_API_KEY
 
@@ -143,7 +143,7 @@ async def create_ingestion(
         condition = (row.get("PropertyCondition") or "").strip()
         remarks = (row.get("PublicRemarks") or "").strip()
 
-        score, bucket, risk, upside, _reasons, _risks = score_listing(price, sqft, dom, condition, remarks, weights)
+        score, bucket, risk, upside, _reasons, _risks, _roi = score_listing(price, sqft, dom, condition, remarks, weights)
         ai_summary = summarize_remarks(remarks)
 
         rec = Listing(
@@ -193,10 +193,52 @@ def get_ingestion(run_id: int, db: Session = Depends(get_db)):
     }
 
 
+@app.get("/api/runs")
+def list_runs(limit: int = Query(default=20), db: Session = Depends(get_db)):
+    rows = db.query(IngestionRun).order_by(IngestionRun.id.desc()).limit(max(1, min(100, limit))).all()
+    return {
+        "items": [
+            {
+                "id": r.id,
+                "filename": r.filename,
+                "source": r.source,
+                "rowsAccepted": r.rows_accepted,
+                "createdAt": r.created_at.isoformat() if r.created_at else None,
+            }
+            for r in rows
+        ]
+    }
+
+
+@app.get("/api/runs/compare")
+def compare_runs(currentRunId: int = Query(...), db: Session = Depends(get_db)):
+    prev = db.query(IngestionRun).filter(IngestionRun.id < currentRunId).order_by(IngestionRun.id.desc()).first()
+    if not prev:
+        return {"error": "no_previous_run"}
+
+    current_rows = db.query(Listing).filter(Listing.run_id == currentRunId).order_by(Listing.score.desc()).limit(20).all()
+    prev_rows = db.query(Listing).filter(Listing.run_id == prev.id).order_by(Listing.score.desc()).limit(20).all()
+    current_ids = [r.listing_id for r in current_rows]
+    prev_ids = [r.listing_id for r in prev_rows]
+
+    overlap = sorted(set(current_ids).intersection(set(prev_ids)))
+    new_ids = [x for x in current_ids if x not in prev_ids]
+    dropped_ids = [x for x in prev_ids if x not in current_ids]
+
+    return {
+        "currentRunId": currentRunId,
+        "previousRunId": prev.id,
+        "overlap": overlap,
+        "newTop": new_ids,
+        "droppedTop": dropped_ids,
+    }
+
+
 @app.get("/api/listings")
 def get_listings(
     runId: int = Query(...),
     bucket: Optional[str] = Query(default=None),
+    reviewStatus: Optional[str] = Query(default=None),
     limit: int = Query(default=TOP_DEFAULT),
     page: int = Query(default=1),
     sortBy: str = Query(default="score"),
@@ -206,6 +248,18 @@ def get_listings(
     q = db.query(Listing).filter(Listing.run_id == runId)
     if bucket:
         q = q.filter(Listing.bucket == bucket)
+
+    if reviewStatus:
+        review_rows = (
+            db.query(ListingReviewStatus.listing_id)
+            .filter(ListingReviewStatus.run_id == runId, ListingReviewStatus.status == reviewStatus)
+            .all()
+        )
+        listing_ids = [r[0] for r in review_rows]
+        if listing_ids:
+            q = q.filter(Listing.listing_id.in_(listing_ids))
+        else:
+            return {"items": [], "total": 0, "page": 1, "pageSize": limit}
 
     total = q.count()
 
@@ -226,6 +280,13 @@ def get_listings(
     items = []
     for r in rows:
         reasons, risks = explain_listing(r.list_price, r.sqft, r.dom, r.condition, r.ai_risk_count, r.ai_upside_count)
+        roi = estimate_flip_roi(r.list_price, r.condition, r.ai_risk_count, r.ai_upside_count)
+        review = (
+            db.query(ListingReviewStatus)
+            .filter(ListingReviewStatus.run_id == runId, ListingReviewStatus.listing_id == r.listing_id)
+            .order_by(ListingReviewStatus.id.desc())
+            .first()
+        )
         items.append(
             {
                 "listingId": r.listing_id,
@@ -238,6 +299,8 @@ def get_listings(
                 "aiSummary": r.ai_summary,
                 "reasons": reasons,
                 "risks": risks,
+                "reviewStatus": review.status if review else "unreviewed",
+                "roi": roi,
             }
         )
 
