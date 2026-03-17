@@ -34,6 +34,8 @@ export interface IngestionResponse {
   rowsReceived: number
   rowsAccepted: number
   rowsRejected: number
+  aiMode?: string
+  aiModelUsed?: string
 }
 
 export interface Scorecard {

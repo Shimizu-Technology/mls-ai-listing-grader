@@ -11,7 +11,7 @@ from .db import Base, engine, get_db
 from .models import IngestionRun, Listing, ScorecardConfig, FeedbackLabel, ListingReviewStatus
 from .scoring import score_listing, explain_listing, estimate_flip_roi
 from .ai import summarize_remarks
-from .config import TOP_DEFAULT, APP_API_KEY
+from .config import TOP_DEFAULT, APP_API_KEY, OPENROUTER_MODEL_FAST, OPENROUTER_MODEL_DEEP, OPENROUTER_MODEL
 
 Base.metadata.create_all(bind=engine)
 app = FastAPI(title="MLS AI Listing Grader API")
@@ -112,10 +112,21 @@ def health():
     return {"ok": True}
 
 
+@app.get("/api/settings/models")
+def model_settings():
+    return {
+        "default": OPENROUTER_MODEL,
+        "fast": OPENROUTER_MODEL_FAST,
+        "deep": OPENROUTER_MODEL_DEEP,
+    }
+
+
 @app.post("/api/ingestions")
 async def create_ingestion(
     file: UploadFile = File(...),
     source: str = Form(default="manual_csv"),
+    aiMode: str = Form(default="fast"),
+    aiModel: Optional[str] = Form(default=None),
     db: Session = Depends(get_db),
 ):
     raw = await file.read()
@@ -124,6 +135,8 @@ async def create_ingestion(
 
     cfg = get_or_create_scorecard(db)
     weights = cfg_to_dict(cfg)
+
+    selected_model = aiModel or (OPENROUTER_MODEL_DEEP if aiMode == "deep" else OPENROUTER_MODEL_FAST)
 
     run = IngestionRun(source=source, filename=file.filename)
     db.add(run)
@@ -144,7 +157,7 @@ async def create_ingestion(
         remarks = (row.get("PublicRemarks") or "").strip()
 
         score, bucket, risk, upside, _reasons, _risks, _roi = score_listing(price, sqft, dom, condition, remarks, weights)
-        ai_summary = summarize_remarks(remarks)
+        ai_summary = summarize_remarks(remarks, selected_model)
 
         rec = Listing(
             run_id=run.id,
@@ -174,6 +187,8 @@ async def create_ingestion(
         "rowsReceived": rows_received,
         "rowsAccepted": rows_accepted,
         "rowsRejected": max(0, rows_received - rows_accepted),
+        "aiMode": aiMode,
+        "aiModelUsed": selected_model,
         "errors": [],
     }
 

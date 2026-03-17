@@ -7,9 +7,11 @@ function apiHeaders(extra: HeadersInit = {}) {
   return key ? { ...extra, 'x-api-key': key } : extra
 }
 
-export async function uploadCsv(file: File): Promise<IngestionResponse> {
+export async function uploadCsv(file: File, aiMode = 'fast', aiModel?: string): Promise<IngestionResponse> {
   const fd = new FormData()
   fd.append('source', 'manual_csv')
+  fd.append('aiMode', aiMode)
+  if (aiModel) fd.append('aiModel', aiModel)
   fd.append('file', file)
   const res = await fetch(`${API_BASE}/api/ingestions`, { method: 'POST', body: fd, headers: apiHeaders() })
   return res.json()
@@ -71,6 +73,11 @@ export async function fetchRuns(limit = 20) {
 
 export async function compareRuns(currentRunId: number) {
   const res = await fetch(`${API_BASE}/api/runs/compare?currentRunId=${currentRunId}`, { headers: apiHeaders() })
+  return res.json()
+}
+
+export async function fetchModelSettings() {
+  const res = await fetch(`${API_BASE}/api/settings/models`, { headers: apiHeaders() })
   return res.json()
 }
 

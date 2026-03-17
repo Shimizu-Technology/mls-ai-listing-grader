@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { FileUp, Filter, SlidersHorizontal, Download, Mail, KeyRound, X } from 'lucide-react'
-import { compareRuns, emailDraft, exportCsv, fetchListings, fetchRuns, fetchScorecard, getFeedback, getReviewStatus, saveFeedback, saveScorecard, setReviewStatus, uploadCsv } from './api'
+import { compareRuns, emailDraft, exportCsv, fetchListings, fetchModelSettings, fetchRuns, fetchScorecard, getFeedback, getReviewStatus, saveFeedback, saveScorecard, setReviewStatus, uploadCsv } from './api'
 import type { Listing, Scorecard } from './types'
 
 const WEIGHT_KEYS: (keyof Scorecard)[] = [
@@ -30,12 +30,16 @@ function App() {
   const [detailStatus, setDetailStatus] = useState<'unreviewed'|'watchlist'|'visited'|'rejected'>('unreviewed')
   const [detailFeedbackLabel, setDetailFeedbackLabel] = useState<'good_lead'|'false_positive'|'false_negative'|''>('')
   const [detailFeedbackNotes, setDetailFeedbackNotes] = useState('')
+  const [aiMode, setAiMode] = useState<'fast'|'deep'>('fast')
+  const [aiModelOverride, setAiModelOverride] = useState('')
+  const [modelSettings, setModelSettings] = useState<{fast?:string;deep?:string;default?:string}>({})
 
   useEffect(() => {
     const persistedKey = localStorage.getItem('mls_api_key') || ''
     setApiKey(persistedKey)
 
     fetchScorecard().then(setScorecard).catch((e) => setDebug(String(e)))
+    fetchModelSettings().then(setModelSettings).catch((e) => setDebug(String(e)))
     refreshRuns().catch((e) => setDebug(String(e)))
     const raw = localStorage.getItem('mls_ui_state')
     if (raw) {
@@ -64,9 +68,9 @@ function App() {
 
   async function onUpload() {
     if (!file) return
-    const res = await uploadCsv(file)
+    const res = await uploadCsv(file, aiMode, aiModelOverride || undefined)
     setRunId(res.ingestionRunId)
-    setMeta(`Rows accepted: ${res.rowsAccepted}/${res.rowsReceived}`)
+    setMeta(`Rows accepted: ${res.rowsAccepted}/${res.rowsReceived} · AI: ${res.aiMode || aiMode} (${res.aiModelUsed || (aiMode==='deep'?modelSettings.deep:modelSettings.fast) || modelSettings.default || 'default'})`)
     setDebug(JSON.stringify(res, null, 2))
     setPage(1)
     await refreshRuns()
@@ -180,8 +184,14 @@ function App() {
           <h3 style={{ marginTop: 0 }}>Upload Run</h3>
           <div className="row">
             <input type="file" accept=".csv" onChange={(e) => setFile(e.target.files?.[0] || null)} />
+            <select value={aiMode} onChange={(e)=>setAiMode(e.target.value as 'fast'|'deep')}>
+              <option value="fast">fast AI</option>
+              <option value="deep">deep AI</option>
+            </select>
+            <input placeholder="optional model override" value={aiModelOverride} onChange={(e)=>setAiModelOverride(e.target.value)} style={{ minWidth: 220 }} />
             <button className="primary" onClick={onUpload}><FileUp size={16} /> Upload CSV</button>
           </div>
+          <p className="muted">Models: fast={modelSettings.fast || '-'} · deep={modelSettings.deep || '-'} · default={modelSettings.default || '-'}</p>
           <p className="muted">Run ID: {runId ?? '-'} · {meta}</p>
         </div>
 
@@ -225,6 +235,8 @@ function App() {
       </section>
 
       <section className="card" style={{ marginTop: 16 }}>
+        <h3 style={{ marginTop: 0 }}>Review Listings</h3>
+        <p className="muted" style={{ marginTop: -4 }}>Filter, triage, and shortlist candidates.</p>
         <div className="row" style={{ marginBottom: 10 }}>
           <Filter size={16} />
           <select value={bucket} onChange={(e) => { setBucket(e.target.value); setPage(1) }}>

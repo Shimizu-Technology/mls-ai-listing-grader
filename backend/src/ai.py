@@ -1,7 +1,8 @@
 import requests
+from typing import Optional
 from .config import OPENROUTER_API_KEY, OPENROUTER_MODEL
 
-def summarize_remarks(remarks: str):
+def summarize_remarks(remarks: str, model: Optional[str] = None):
     text = (remarks or "").strip()
     if not text:
         return None
@@ -23,7 +24,7 @@ def summarize_remarks(remarks: str):
                 "Content-Type": "application/json",
             },
             json={
-                "model": OPENROUTER_MODEL,
+                "model": model or OPENROUTER_MODEL,
                 "messages": [{"role": "user", "content": prompt}],
                 "temperature": 0.2,
             },
