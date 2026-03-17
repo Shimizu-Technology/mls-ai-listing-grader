@@ -5,9 +5,10 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 import csv
 import io
+from typing import Optional
 
 from .db import Base, engine, get_db
-from .models import IngestionRun, Listing, ScorecardConfig, FeedbackLabel
+from .models import IngestionRun, Listing, ScorecardConfig, FeedbackLabel, ListingReviewStatus
 from .scoring import score_listing, explain_listing
 from .ai import summarize_remarks
 from .config import TOP_DEFAULT, APP_API_KEY
@@ -53,7 +54,14 @@ class FeedbackIn(BaseModel):
     runId: int
     listingId: str
     label: str
-    notes: str | None = None
+    notes: Optional[str] = None
+
+
+class ReviewStatusIn(BaseModel):
+    runId: int
+    listingId: str
+    status: str
+    notes: Optional[str] = None
 
 
 def to_float(v, default=0.0):
@@ -188,7 +196,7 @@ def get_ingestion(run_id: int, db: Session = Depends(get_db)):
 @app.get("/api/listings")
 def get_listings(
     runId: int = Query(...),
-    bucket: str | None = Query(default=None),
+    bucket: Optional[str] = Query(default=None),
     limit: int = Query(default=TOP_DEFAULT),
     page: int = Query(default=1),
     sortBy: str = Query(default="score"),
@@ -277,7 +285,7 @@ def digest_preview(runId: int = Query(...), top: int = Query(default=5), db: Ses
 
 
 @app.get("/api/digest/email_draft")
-def digest_email_draft(runId: int = Query(...), top: int = Query(default=5), status: str | None = Query(default=None), db: Session = Depends(get_db)):
+def digest_email_draft(runId: int = Query(...), top: int = Query(default=5), status: Optional[str] = Query(default=None), db: Session = Depends(get_db)):
     base_q = db.query(Listing).filter(Listing.run_id == runId)
     rows = base_q.order_by(Listing.score.desc()).limit(max(1, min(20, top))).all()
     if status:

@@ -1,3 +1,4 @@
+from typing import Optional
 DEFAULT_WEIGHTS = {
     "ppsf_low_bonus": 12,
     "ppsf_mid_bonus": 6,
@@ -53,7 +54,7 @@ def explain_listing(price: float, sqft: float, dom: int, condition: str, risk: i
     return reasons[:3], risks[:3]
 
 
-def score_listing(price: float, sqft: float, dom: int, condition: str, remarks: str, weights: dict | None = None):
+def score_listing(price: float, sqft: float, dom: int, condition: str, remarks: str, weights: Optional[dict] = None):
     w = {**DEFAULT_WEIGHTS, **(weights or {})}
     score = 50.0
     ppsf = (price / sqft) if sqft and sqft > 0 else 9999
