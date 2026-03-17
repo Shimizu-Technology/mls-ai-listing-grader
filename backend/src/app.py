@@ -10,7 +10,7 @@ from .db import Base, engine, get_db
 from .models import IngestionRun, Listing, ScorecardConfig, FeedbackLabel
 from .scoring import score_listing, explain_listing
 from .ai import summarize_remarks
-from .config import TOP_DEFAULT
+from .config import TOP_DEFAULT, APP_API_KEY
 
 Base.metadata.create_all(bind=engine)
 app = FastAPI(title="MLS AI Listing Grader API")
@@ -26,6 +26,15 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def api_key_gate(request, call_next):
+    if APP_API_KEY and request.url.path.startswith("/api"):
+        incoming = request.headers.get("x-api-key", "")
+        if incoming != APP_API_KEY:
+            return Response(content='{"error":"unauthorized"}', media_type="application/json", status_code=401)
+    return await call_next(request)
 
 
 class ScorecardUpdate(BaseModel):

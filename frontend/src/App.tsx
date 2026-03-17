@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import { FileUp, Filter, SlidersHorizontal, Download, Mail } from 'lucide-react'
-import { emailDraft, exportCsvUrl, fetchListings, fetchScorecard, saveFeedback, saveScorecard, uploadCsv } from './api'
+import { FileUp, Filter, SlidersHorizontal, Download, Mail, KeyRound, X } from 'lucide-react'
+import { emailDraft, exportCsv, fetchListings, fetchScorecard, saveFeedback, saveScorecard, uploadCsv } from './api'
 import type { Listing, Scorecard } from './types'
 
 const WEIGHT_KEYS: (keyof Scorecard)[] = [
@@ -21,8 +21,13 @@ function App() {
   const [items, setItems] = useState<Listing[]>([])
   const [scorecard, setScorecard] = useState<Scorecard | null>(null)
   const [debug, setDebug] = useState('')
+  const [apiKey, setApiKey] = useState('')
+  const [selected, setSelected] = useState<Listing | null>(null)
 
   useEffect(() => {
+    const persistedKey = localStorage.getItem('mls_api_key') || ''
+    setApiKey(persistedKey)
+
     fetchScorecard().then(setScorecard).catch((e) => setDebug(String(e)))
     const raw = localStorage.getItem('mls_ui_state')
     if (raw) {
@@ -100,6 +105,24 @@ function App() {
     setDebug(`SUBJECT: ${res.subject}\n\n${res.body}`)
   }
 
+  async function onExportCsv() {
+    if (!runId) return
+    const blob = await exportCsv(runId, 200)
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `mls_top_${runId}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  function saveApiKey() {
+    if (apiKey.trim()) localStorage.setItem('mls_api_key', apiKey.trim())
+    else localStorage.removeItem('mls_api_key')
+    setDebug('Saved API key setting. Refreshing scorecard...')
+    fetchScorecard().then(setScorecard).catch((e) => setDebug(String(e)))
+  }
+
   return (
     <main className="app-shell">
       <h1 style={{ margin: 0 }}>MLS AI Listing Grader</h1>
@@ -116,32 +139,42 @@ function App() {
         </div>
 
         <div className="card">
-          <h3 style={{ marginTop: 0 }}>Scorecard Weights</h3>
-          {scorecard && (
-            <>
-              <div className="row" style={{ marginBottom: 8 }}>
-                <button onClick={() => applyPreset('conservative')}>Conservative</button>
-                <button onClick={() => applyPreset('balanced')}>Balanced</button>
-                <button onClick={() => applyPreset('aggressive')}>Aggressive</button>
-                <button className="primary" onClick={onSaveWeights}><SlidersHorizontal size={16} /> Save</button>
-              </div>
-              <div className="row">
-                {WEIGHT_KEYS.map((k) => (
-                  <label key={k} style={{ display: 'grid', gap: 4 }}>
-                    <span className="muted">{k}</span>
-                    <input
-                      type="number"
-                      step="0.1"
-                      value={Number(scorecard[k] as number)}
-                      onChange={(e) => setScorecard({ ...scorecard, [k]: Number(e.target.value) })}
-                      style={{ width: 120 }}
-                    />
-                  </label>
-                ))}
-              </div>
-            </>
-          )}
+          <h3 style={{ marginTop: 0 }}>API Access</h3>
+          <div className="row">
+            <KeyRound size={16} />
+            <input type="password" placeholder="x-api-key (optional)" value={apiKey} onChange={(e)=>setApiKey(e.target.value)} style={{ minWidth: 280 }} />
+            <button onClick={saveApiKey}>Save Key</button>
+          </div>
+          <p className="muted">Set this if backend APP_API_KEY is enabled.</p>
         </div>
+      </section>
+
+      <section className="card" style={{ marginTop: 16 }}>
+        <h3 style={{ marginTop: 0 }}>Scorecard Weights</h3>
+        {scorecard && (
+          <>
+            <div className="row" style={{ marginBottom: 8 }}>
+              <button onClick={() => applyPreset('conservative')}>Conservative</button>
+              <button onClick={() => applyPreset('balanced')}>Balanced</button>
+              <button onClick={() => applyPreset('aggressive')}>Aggressive</button>
+              <button className="primary" onClick={onSaveWeights}><SlidersHorizontal size={16} /> Save</button>
+            </div>
+            <div className="row">
+              {WEIGHT_KEYS.map((k) => (
+                <label key={k} style={{ display: 'grid', gap: 4 }}>
+                  <span className="muted">{k}</span>
+                  <input
+                    type="number"
+                    step="0.1"
+                    value={Number(scorecard[k] as number)}
+                    onChange={(e) => setScorecard({ ...scorecard, [k]: Number(e.target.value) })}
+                    style={{ width: 120 }}
+                  />
+                </label>
+              ))}
+            </div>
+          </>
+        )}
       </section>
 
       <section className="card" style={{ marginTop: 16 }}>
@@ -168,7 +201,7 @@ function App() {
           <span className="muted">Page {page}/{maxPage} ({total})</span>
           <button onClick={() => setPage(Math.min(maxPage, page + 1))}>Next</button>
           <button onClick={refreshListings}>Refresh</button>
-          <button onClick={() => runId && window.open(exportCsvUrl(runId, 200), '_blank')}><Download size={16} /> CSV</button>
+          <button onClick={onExportCsv}><Download size={16} /> CSV</button>
           <button onClick={onEmailDraft}><Mail size={16} /> Draft</button>
         </div>
 
@@ -181,7 +214,7 @@ function App() {
             </thead>
             <tbody>
               {items.map((x) => (
-                <tr key={x.listingId}>
+                <tr key={x.listingId} onClick={() => setSelected(x)} style={{ cursor: 'pointer' }}>
                   <td>{x.listingId}</td>
                   <td><strong>{x.score}</strong></td>
                   <td><span className={`badge ${x.bucket}`}>{x.bucket}</span></td>
@@ -193,7 +226,7 @@ function App() {
                     <div className="kicker risk">! {x.risks.join(' • ')}</div>
                   </td>
                   <td>
-                    <select onChange={(e) => onFeedback(x.listingId, e.target.value)} defaultValue="">
+                    <select onClick={(e)=>e.stopPropagation()} onChange={(e) => onFeedback(x.listingId, e.target.value)} defaultValue="">
                       <option value="">-</option>
                       <option value="good_lead">good_lead</option>
                       <option value="false_positive">false_positive</option>
@@ -206,6 +239,24 @@ function App() {
           </table>
         </div>
       </section>
+
+      {selected && (
+        <div className="card" style={{ marginTop: 16, borderColor: '#99f6e4' }}>
+          <div className="row" style={{ justifyContent: 'space-between' }}>
+            <h3 style={{ margin: 0 }}>Listing Detail · {selected.listingId}</h3>
+            <button onClick={() => setSelected(null)}><X size={16} /></button>
+          </div>
+          <div className="row" style={{ marginTop: 8 }}>
+            <span className={`badge ${selected.bucket}`}>{selected.bucket}</span>
+            <span><strong>Score:</strong> {selected.score}</span>
+            <span><strong>Price:</strong> ${selected.price.toLocaleString()}</span>
+            <span><strong>DOM:</strong> {selected.dom}</span>
+          </div>
+          <p className="kicker" style={{ marginTop: 10 }}><strong>AI Summary:</strong> {selected.aiSummary || '—'}</p>
+          <p className="kicker"><strong>Reasons:</strong> {selected.reasons.join(' • ') || '—'}</p>
+          <p className="kicker risk"><strong>Risks:</strong> {selected.risks.join(' • ') || '—'}</p>
+        </div>
+      )}
 
       <pre style={{ background: '#f5f5f4', border: '1px solid var(--border)', borderRadius: 12, padding: 12, marginTop: 16, whiteSpace: 'pre-wrap' }}>{debug}</pre>
     </main>
