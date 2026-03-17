@@ -61,3 +61,13 @@ class FeedbackLabel(Base):
     label = Column(String(32), index=True)  # good_lead|false_positive|false_negative
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class ListingReviewStatus(Base):
+    __tablename__ = "listing_review_statuses"
+    id = Column(Integer, primary_key=True, index=True)
+    run_id = Column(Integer, ForeignKey("ingestion_runs.id"), index=True)
+    listing_id = Column(String(64), index=True)
+    status = Column(String(32), default="unreviewed", index=True)  # unreviewed|watchlist|visited|rejected
+    notes = Column(Text, nullable=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

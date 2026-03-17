@@ -277,8 +277,17 @@ def digest_preview(runId: int = Query(...), top: int = Query(default=5), db: Ses
 
 
 @app.get("/api/digest/email_draft")
-def digest_email_draft(runId: int = Query(...), top: int = Query(default=5), db: Session = Depends(get_db)):
-    rows = db.query(Listing).filter(Listing.run_id == runId).order_by(Listing.score.desc()).limit(max(1, min(20, top))).all()
+def digest_email_draft(runId: int = Query(...), top: int = Query(default=5), status: str | None = Query(default=None), db: Session = Depends(get_db)):
+    base_q = db.query(Listing).filter(Listing.run_id == runId)
+    rows = base_q.order_by(Listing.score.desc()).limit(max(1, min(20, top))).all()
+    if status:
+      keep = []
+      for r in rows:
+          review = db.query(ListingReviewStatus).filter(ListingReviewStatus.run_id == runId, ListingReviewStatus.listing_id == r.listing_id).first()
+          current = review.status if review else "unreviewed"
+          if current == status:
+              keep.append(r)
+      rows = keep
     lines = [f"MLS Top {top} candidates (run {runId})", ""]
     for i, r in enumerate(rows, start=1):
         lines.append(f"{i}. {r.listing_id} | score {r.score} | {r.bucket} | ${r.list_price:,.0f} | DOM {r.dom}")
@@ -312,3 +321,54 @@ def create_feedback(payload: FeedbackIn, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(fb)
     return {"ok": True, "id": fb.id}
+
+
+@app.get("/api/feedback")
+def get_feedback(runId: int = Query(...), listingId: str = Query(...), db: Session = Depends(get_db)):
+    rows = (
+        db.query(FeedbackLabel)
+        .filter(FeedbackLabel.run_id == runId, FeedbackLabel.listing_id == listingId)
+        .order_by(FeedbackLabel.id.desc())
+        .limit(20)
+        .all()
+    )
+    return {
+        "items": [
+            {
+                "id": r.id,
+                "label": r.label,
+                "notes": r.notes,
+                "createdAt": r.created_at.isoformat() if r.created_at else None,
+            }
+            for r in rows
+        ]
+    }
+
+
+@app.post("/api/review-status")
+def set_review_status(payload: ReviewStatusIn, db: Session = Depends(get_db)):
+    if payload.status not in ["unreviewed", "watchlist", "visited", "rejected"]:
+        return {"error": "invalid_status"}
+    row = (
+        db.query(ListingReviewStatus)
+        .filter(ListingReviewStatus.run_id == payload.runId, ListingReviewStatus.listing_id == payload.listingId)
+        .first()
+    )
+    if not row:
+        row = ListingReviewStatus(run_id=payload.runId, listing_id=payload.listingId)
+        db.add(row)
+    row.status = payload.status
+    row.notes = payload.notes
+    db.commit()
+    db.refresh(row)
+    return {"ok": True, "status": row.status}
+
+
+@app.get("/api/review-status")
+def get_review_status(runId: int = Query(...), listingId: str = Query(...), db: Session = Depends(get_db)):
+    row = (
+        db.query(ListingReviewStatus)
+        .filter(ListingReviewStatus.run_id == runId, ListingReviewStatus.listing_id == listingId)
+        .first()
+    )
+    return {"status": row.status if row else "unreviewed", "notes": row.notes if row else None}

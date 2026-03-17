@@ -11,6 +11,7 @@ export interface Listing {
   aiSummary?: string | null
   reasons: string[]
   risks: string[]
+  reviewStatus?: 'unreviewed' | 'watchlist' | 'visited' | 'rejected'
 }
 
 export interface ListingsResponse {

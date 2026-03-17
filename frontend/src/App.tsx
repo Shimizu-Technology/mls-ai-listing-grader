@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { FileUp, Filter, SlidersHorizontal, Download, Mail, KeyRound, X } from 'lucide-react'
-import { emailDraft, exportCsv, fetchListings, fetchScorecard, saveFeedback, saveScorecard, uploadCsv } from './api'
+import { emailDraft, exportCsv, fetchListings, fetchScorecard, getFeedback, getReviewStatus, saveFeedback, saveScorecard, setReviewStatus, uploadCsv } from './api'
 import type { Listing, Scorecard } from './types'
 
 const WEIGHT_KEYS: (keyof Scorecard)[] = [
@@ -23,6 +23,8 @@ function App() {
   const [debug, setDebug] = useState('')
   const [apiKey, setApiKey] = useState('')
   const [selected, setSelected] = useState<Listing | null>(null)
+  const [feedbackHistory, setFeedbackHistory] = useState<Array<{label:string;createdAt?:string}>>([])
+  const [detailStatus, setDetailStatus] = useState<'unreviewed'|'watchlist'|'visited'|'rejected'>('unreviewed')
 
   useEffect(() => {
     const persistedKey = localStorage.getItem('mls_api_key') || ''
@@ -103,6 +105,24 @@ function App() {
     if (!runId) return
     const res = await emailDraft(runId, 5)
     setDebug(`SUBJECT: ${res.subject}\n\n${res.body}`)
+  }
+
+  async function openDetail(item: Listing) {
+    setSelected(item)
+    if (!runId) return
+    const [fb, rs] = await Promise.all([
+      getFeedback(runId, item.listingId),
+      getReviewStatus(runId, item.listingId),
+    ])
+    setFeedbackHistory((fb.items || []).map((x: { label: string; createdAt?: string }) => ({ label: x.label, createdAt: x.createdAt })))
+    setDetailStatus((rs.status || 'unreviewed') as 'unreviewed' | 'watchlist' | 'visited' | 'rejected')
+  }
+
+  async function saveDetailStatus(next: 'unreviewed'|'watchlist'|'visited'|'rejected') {
+    if (!runId || !selected) return
+    await setReviewStatus(runId, selected.listingId, next)
+    setDetailStatus(next)
+    setItems((prev) => prev.map((x) => x.listingId === selected.listingId ? { ...x, reviewStatus: next } : x))
   }
 
   async function onExportCsv() {
@@ -214,7 +234,7 @@ function App() {
             </thead>
             <tbody>
               {items.map((x) => (
-                <tr key={x.listingId} onClick={() => setSelected(x)} style={{ cursor: 'pointer' }}>
+                <tr key={x.listingId} onClick={() => openDetail(x)} style={{ cursor: 'pointer' }}>
                   <td>{x.listingId}</td>
                   <td><strong>{x.score}</strong></td>
                   <td><span className={`badge ${x.bucket}`}>{x.bucket}</span></td>
@@ -224,6 +244,7 @@ function App() {
                     <div>{x.aiSummary || ''}</div>
                     <div className="kicker">+ {x.reasons.join(' • ')}</div>
                     <div className="kicker risk">! {x.risks.join(' • ')}</div>
+                    <div className="kicker">review: {x.reviewStatus || 'unreviewed'}</div>
                   </td>
                   <td>
                     <select onClick={(e)=>e.stopPropagation()} onChange={(e) => onFeedback(x.listingId, e.target.value)} defaultValue="">
@@ -255,6 +276,18 @@ function App() {
           <p className="kicker" style={{ marginTop: 10 }}><strong>AI Summary:</strong> {selected.aiSummary || '—'}</p>
           <p className="kicker"><strong>Reasons:</strong> {selected.reasons.join(' • ') || '—'}</p>
           <p className="kicker risk"><strong>Risks:</strong> {selected.risks.join(' • ') || '—'}</p>
+          <div className="row" style={{ marginTop: 10 }}>
+            <strong>Status:</strong>
+            <select value={detailStatus} onChange={(e)=>saveDetailStatus(e.target.value as any)}>
+              <option value="unreviewed">unreviewed</option>
+              <option value="watchlist">watchlist</option>
+              <option value="visited">visited</option>
+              <option value="rejected">rejected</option>
+            </select>
+          </div>
+          <div className="kicker" style={{ marginTop: 10 }}>
+            <strong>Recent feedback:</strong> {feedbackHistory.length ? feedbackHistory.map((f)=>`${f.label}${f.createdAt?` (${new Date(f.createdAt).toLocaleString()})`:''}`).join(' | ') : 'none'}
+          </div>
         </div>
       )}
 

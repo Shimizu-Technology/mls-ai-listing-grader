@@ -43,6 +43,27 @@ export async function saveFeedback(runId: number, listingId: string, label: stri
   })
 }
 
+export async function getFeedback(runId: number, listingId: string) {
+  const qs = new URLSearchParams({ runId: String(runId), listingId })
+  const res = await fetch(`${API_BASE}/api/feedback?${qs}`, { headers: apiHeaders() })
+  return res.json()
+}
+
+export async function setReviewStatus(runId: number, listingId: string, status: string, notes?: string) {
+  const res = await fetch(`${API_BASE}/api/review-status`, {
+    method: 'POST',
+    headers: apiHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ runId, listingId, status, notes }),
+  })
+  return res.json()
+}
+
+export async function getReviewStatus(runId: number, listingId: string) {
+  const qs = new URLSearchParams({ runId: String(runId), listingId })
+  const res = await fetch(`${API_BASE}/api/review-status?${qs}`, { headers: apiHeaders() })
+  return res.json()
+}
+
 export async function exportCsv(runId: number, top = 200) {
   const res = await fetch(`${API_BASE}/api/export/top.csv?runId=${runId}&top=${top}`, { headers: apiHeaders() })
   return res.blob()
