@@ -7,11 +7,12 @@ Working MVP API + minimal web uploader for CSV-based MLS scoring with optional O
 - SQLite persistence (runs + listings + scorecard + feedback)
 - Deterministic score + recommendation bucket
 - Optional AI summary per listing remarks via OpenRouter
-- Ranked listing retrieval endpoint
-- Editable active scorecard weights
+- Ranked listing retrieval endpoint (sorting + pagination)
+- Editable active scorecard weights + presets (conservative/balanced/aggressive)
 - Feedback label endpoint
-- Digest preview endpoint
-- Basic web UI at `/`
+- Digest preview endpoint + email draft endpoint
+- Top candidates CSV export endpoint
+- Basic web UI at `/` with filters/actions
 
 ## Setup
 ```bash
@@ -52,4 +53,14 @@ curl -s http://localhost:8011/api/scorecards/active | jq
 Digest preview:
 ```bash
 curl -s "http://localhost:8011/api/digest/preview?runId=1&top=5" | jq
+```
+
+Email draft:
+```bash
+curl -s "http://localhost:8011/api/digest/email_draft?runId=1&top=5" | jq
+```
+
+Export CSV:
+```bash
+curl -L "http://localhost:8011/api/export/top.csv?runId=1&top=50" -o top.csv
 ```
