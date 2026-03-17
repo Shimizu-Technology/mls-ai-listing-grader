@@ -6,7 +6,7 @@ import csv, io
 
 from .db import Base, engine, get_db
 from .models import IngestionRun, Listing, ScorecardConfig, FeedbackLabel
-from .scoring import score_listing
+from .scoring import score_listing, explain_listing
 from .ai import summarize_remarks
 from .config import TOP_DEFAULT
 
@@ -149,6 +149,37 @@ def home():
           let totalRows = 0;
 
           function fmtMoney(n){ return new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:0}).format(n||0); }
+          function bucketBadge(b){
+            const c = b==='schedule_visit' ? '#0f766e' : b==='desk_review' ? '#a16207' : '#6b7280';
+            return `<span style="background:${c};color:white;padding:2px 6px;border-radius:999px;font-size:11px">${b}</span>`;
+          }
+
+
+          function saveUiState(){
+            const state = {
+              bucket: document.getElementById('bucket').value,
+              limit: document.getElementById('limit').value,
+              sortBy: document.getElementById('sortBy').value,
+              sortDir: document.getElementById('sortDir').value,
+              page: currentPage,
+              runId: currentRunId,
+            };
+            localStorage.setItem('mlsGraderUi', JSON.stringify(state));
+          }
+
+          function restoreUiState(){
+            try {
+              const raw = localStorage.getItem('mlsGraderUi');
+              if(!raw) return;
+              const s = JSON.parse(raw);
+              if(s.bucket != null) document.getElementById('bucket').value = s.bucket;
+              if(s.limit != null) document.getElementById('limit').value = s.limit;
+              if(s.sortBy != null) document.getElementById('sortBy').value = s.sortBy;
+              if(s.sortDir != null) document.getElementById('sortDir').value = s.sortDir;
+              if(s.page) currentPage = s.page;
+              if(s.runId){ currentRunId = s.runId; runIdEl.textContent = s.runId; }
+            } catch {}
+          }
 
           async function loadWeights(){
             const r = await fetch('/api/scorecards/active');
@@ -201,10 +232,10 @@ def home():
               tr.innerHTML = `
                 <td>${item.listingId}</td>
                 <td><b>${item.score}</b></td>
-                <td>${item.bucket}</td>
+                <td>${bucketBadge(item.bucket)}</td>
                 <td>${fmtMoney(item.price)}</td>
                 <td>${item.dom}</td>
-                <td>${item.aiSummary || ''}</td>
+                <td><div style='font-size:12px'>${item.aiSummary || ''}</div><div style='font-size:11px;color:#444'>+ ${(item.reasons||[]).join(' • ')}</div><div style='font-size:11px;color:#b45309'>! ${(item.risks||[]).join(' • ')}</div></td>
                 <td>
                   <select data-listing='${item.listingId}'>
                     <option value=''>-</option>
@@ -248,17 +279,18 @@ def home():
             runIdEl.textContent = currentRunId || '-';
             ingestionMeta.textContent = `Rows: ${j.rowsAccepted}/${j.rowsReceived}`;
             await loadListings();
+            saveUiState();
           });
 
-          document.getElementById('refresh').addEventListener('click', ()=>{currentPage=1; loadListings();});
+          document.getElementById('refresh').addEventListener('click', ()=>{currentPage=1; loadListings(); saveUiState();});
           document.getElementById('digest').addEventListener('click', loadDigest);
           document.getElementById('saveWeights').addEventListener('click', saveWeights);
-          document.getElementById('prevPage').addEventListener('click', ()=>{ if(currentPage>1){ currentPage--; loadListings(); }});
-          document.getElementById('nextPage').addEventListener('click', ()=>{ currentPage++; loadListings(); });
-          document.getElementById('sortBy').addEventListener('change', ()=>{ currentPage=1; loadListings(); });
-          document.getElementById('sortDir').addEventListener('change', ()=>{ currentPage=1; loadListings(); });
-          document.getElementById('bucket').addEventListener('change', ()=>{ currentPage=1; loadListings(); });
-          document.getElementById('limit').addEventListener('change', ()=>{ currentPage=1; loadListings(); });
+          document.getElementById('prevPage').addEventListener('click', ()=>{ if(currentPage>1){ currentPage--; loadListings(); saveUiState(); }});
+          document.getElementById('nextPage').addEventListener('click', ()=>{ currentPage++; loadListings(); saveUiState(); });
+          document.getElementById('sortBy').addEventListener('change', ()=>{ currentPage=1; loadListings(); saveUiState(); });
+          document.getElementById('sortDir').addEventListener('change', ()=>{ currentPage=1; loadListings(); saveUiState(); });
+          document.getElementById('bucket').addEventListener('change', ()=>{ currentPage=1; loadListings(); saveUiState(); });
+          document.getElementById('limit').addEventListener('change', ()=>{ currentPage=1; loadListings(); saveUiState(); });
 
           document.getElementById('exportCsv').addEventListener('click', ()=>{
             if(!currentRunId) return;
@@ -293,7 +325,8 @@ def home():
             await saveFeedback(listingId, sel?.value || '');
           });
 
-          loadWeights().catch(err => debug.textContent = String(err));
+          restoreUiState();
+          loadWeights().then(()=>{ if(currentRunId) loadListings(); }).catch(err => debug.textContent = String(err));
         </script>
       </body>
     </html>
@@ -336,7 +369,7 @@ async def create_ingestion(
         condition = (row.get("PropertyCondition") or "").strip()
         remarks = (row.get("PublicRemarks") or "").strip()
 
-        score, bucket, risk, upside = score_listing(price, sqft, dom, condition, remarks, weights)
+        score, bucket, risk, upside, reasons, risks = score_listing(price, sqft, dom, condition, remarks, weights)
         ai_summary = summarize_remarks(remarks)
 
         rec = Listing(
@@ -427,6 +460,8 @@ def get_listings(
                 "aiRiskCount": r.ai_risk_count,
                 "aiUpsideCount": r.ai_upside_count,
                 "aiSummary": r.ai_summary,
+                "reasons": explain_listing(r.list_price, r.sqft, r.dom, r.condition, r.ai_risk_count, r.ai_upside_count)[0],
+                "risks": explain_listing(r.list_price, r.sqft, r.dom, r.condition, r.ai_risk_count, r.ai_upside_count)[1],
             }
             for r in rows
         ],

@@ -20,6 +20,39 @@ def ai_signals(remarks: str):
     return risk, upside
 
 
+def explain_listing(price: float, sqft: float, dom: int, condition: str, risk: int, upside: int):
+    reasons = []
+    risks = []
+    ppsf = (price / sqft) if sqft and sqft > 0 else None
+
+    if ppsf is None:
+        risks.append("Missing sqft")
+    elif ppsf < 260:
+        reasons.append("Low price/sqft")
+    elif ppsf < 320:
+        reasons.append("Reasonable price/sqft")
+    else:
+        risks.append("High price/sqft")
+
+    if dom <= 21:
+        reasons.append("Fresh listing (low DOM)")
+    elif dom > 45:
+        risks.append("Stale listing (high DOM)")
+
+    c = (condition or "").lower()
+    if c in ["good", "excellent"]:
+        reasons.append("Good condition")
+    elif c == "fair":
+        risks.append("Fair condition")
+
+    if upside > 0:
+        reasons.append(f"Upside signals x{upside}")
+    if risk > 0:
+        risks.append(f"Risk signals x{risk}")
+
+    return reasons[:3], risks[:3]
+
+
 def score_listing(price: float, sqft: float, dom: int, condition: str, remarks: str, weights: dict | None = None):
     w = {**DEFAULT_WEIGHTS, **(weights or {})}
     score = 50.0
@@ -49,4 +82,5 @@ def score_listing(price: float, sqft: float, dom: int, condition: str, remarks: 
 
     score = max(0, min(100, score))
     bucket = "schedule_visit" if score >= 75 else "desk_review" if score >= 60 else "skip"
-    return round(score, 1), bucket, risk, upside
+    reasons, risks = explain_listing(price, sqft, dom, condition, risk, upside)
+    return round(score, 1), bucket, risk, upside, reasons, risks

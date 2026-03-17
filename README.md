@@ -8,11 +8,13 @@ Working MVP API + minimal web uploader for CSV-based MLS scoring with optional O
 - Deterministic score + recommendation bucket
 - Optional AI summary per listing remarks via OpenRouter
 - Ranked listing retrieval endpoint (sorting + pagination)
+- Listing explanation signals (top reasons + risks)
 - Editable active scorecard weights + presets (conservative/balanced/aggressive)
 - Feedback label endpoint
 - Digest preview endpoint + email draft endpoint
 - Top candidates CSV export endpoint
 - Basic web UI at `/` with filters/actions
+- UI state persistence (bucket/sort/limit/page/runId) via localStorage
 
 ## Setup
 ```bash
